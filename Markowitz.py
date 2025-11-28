@@ -41,6 +41,10 @@ for asset in assets:
     df[asset] = raw['Adj Close']
 
 df_returns = df.pct_change().fillna(0)
+df.index.name = "Date"
+df.columns.name = "Symbol"
+df_returns.index.name = "Date"
+df_returns.columns.name = "Symbol"
 
 
 """
@@ -57,11 +61,17 @@ class EqualWeightPortfolio:
     def calculate_weights(self):
         # Get the assets by excluding the specified column
         assets = df.columns[df.columns != self.exclude]
-        self.portfolio_weights = pd.DataFrame(index=df.index, columns=df.columns)
+        self.portfolio_weights = pd.DataFrame(
+            index=df.index, columns=df.columns, dtype=float
+        )
 
         """
         TODO: Complete Task 1 Below
         """
+
+        equal_weight = 1 / len(assets)
+        self.portfolio_weights.loc[:, assets] = equal_weight
+        self.portfolio_weights.loc[:, self.exclude] = 0
 
         """
         TODO: Complete Task 1 Above
@@ -108,12 +118,26 @@ class RiskParityPortfolio:
         assets = df.columns[df.columns != self.exclude]
 
         # Calculate the portfolio weights
-        self.portfolio_weights = pd.DataFrame(index=df.index, columns=df.columns)
+        self.portfolio_weights = pd.DataFrame(
+            index=df.index, columns=df.columns, dtype=float
+        )
 
         """
         TODO: Complete Task 2 Below
         """
 
+        for i in range(self.lookback + 1, len(df)):
+            window = df_returns[assets].iloc[i - self.lookback : i]
+            vol = window.std()
+            if vol.isna().any():
+                continue
+            inv_vol = 1 / vol.replace(0, np.nan)
+            if inv_vol.isna().all():
+                continue
+            weights = inv_vol / inv_vol.sum()
+            self.portfolio_weights.loc[df.index[i], assets] = weights.values
+            self.portfolio_weights.loc[df.index[i], self.exclude] = 0
+        self.portfolio_weights.loc[:, self.exclude] = 0.0
 
 
         """
@@ -163,7 +187,9 @@ class MeanVariancePortfolio:
         assets = df.columns[df.columns != self.exclude]
 
         # Calculate the portfolio weights
-        self.portfolio_weights = pd.DataFrame(index=df.index, columns=df.columns)
+        self.portfolio_weights = pd.DataFrame(
+            index=df.index, columns=df.columns, dtype=float
+        )
 
         for i in range(self.lookback + 1, len(df)):
             R_n = df_returns.copy()[assets].iloc[i - self.lookback : i]
@@ -188,10 +214,15 @@ class MeanVariancePortfolio:
                 TODO: Complete Task 3 Below
                 """
 
-                # Sample Code: Initialize Decision w and the Objective
-                # NOTE: You can modify the following code
-                w = model.addMVar(n, name="w", ub=1)
-                model.setObjective(w.sum(), gp.GRB.MAXIMIZE)
+                w = model.addMVar(n, name="w", lb=0, ub=1)
+                model.addConstr(w.sum() == 1, name="budget")
+                ret = mu @ w
+                risk = gp.QuadExpr()
+                for i in range(n):
+                    for j in range(n):
+                        if Sigma[i, j] != 0:
+                            risk += Sigma[i, j] * w[i] * w[j]
+                model.setObjective(ret - (gamma / 2.0) * risk, gp.GRB.MAXIMIZE)
 
                 """
                 TODO: Complete Task 3 Above
